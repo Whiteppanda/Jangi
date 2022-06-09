@@ -1,10 +1,10 @@
 #include "fpga_api.h"
 #include <stdio.h>
-#include <iostream>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
 #include <cstring>
 #include <cmath>
-
-using namespace std;
 
 #define min(x, y) (((x) < (y)) ? (x) : (y))
 
@@ -33,14 +33,21 @@ FPGA::FPGA(off_t data_addr, off_t output_addr, int m_size, int v_size)
   data_ = new float[data_size_];
   data_M = new float[data_size_M];
 
-  qdata_ = new int[data_size_];
-  qdata_M = new int[data_size_M];
+  fd_ = open("/dev/mem", O_RDWR);
 
+  qdata_ = new int[data_size_];
+  qdata_M = static_cast<int *>(mmap(NULL, data_size_M, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, data_addr));
+  
+  output_ = static_cast<unsigned int *>(mmap(NULL, sizeof(unsigned int), PROT_READ | PROT_WRITE, MAP_SHARED, fd_, output_addr));
   num_block_call_ = 0;
 }
 
 FPGA::~FPGA()
 {
+  munmap(qdata_M, data_size_);
+  munmap(output_, sizeof(unsigned int));
+  close(fd_);
+
   delete[] output_;
   delete[] data_;
   delete[] qvec_;
@@ -48,24 +55,42 @@ FPGA::~FPGA()
   delete[] qout_;
 }
 
-float *FPGA::matrix(void)
+float* FPGA::matrix(void)
 {
   return data_ + v_size_;
 }
 
-float *FPGA::vector(void)
+float* FPGA::vector(void)
 {
   return data_;
 }
 
-float *FPGA::matrix_M1(void)
-{
+float *FPGA::matrix_M1(void){
   return data_M;
 }
 
-float *FPGA::matrix_M2(void)
-{
+float *FPGA::matrix_M2(void){
   return data_M + m1_size_;
+}
+
+int *FPGA::qmatrix(void)
+{
+  return qdata_ + v_size_;
+}
+
+int *FPGA::qvector(void)
+{
+  return qdata_;
+}
+
+int *FPGA::qmatrix_M1(void)
+{
+  return qdata_M;
+}
+
+int *FPGA::qmatrix_M2(void)
+{
+  return qdata_M + m1_size_;
 }
 
 void FPGA::reset(void)
@@ -80,9 +105,9 @@ int FPGA::num_block_call(void)
 
 void quantize(const float* input, int* quantized, int num_input, int bits_min, int bits_max, int offset, float scale)
 {
-  int i;
-  for(i = 0; i < num_input; i = i + 4)
+  for(int i = 0; i < num_input; i++)
   {
+    // TODO: convert floating point to quantized value
     quantized[i] = round(input[i]/scale);
   }
 }
@@ -95,13 +120,25 @@ void dequantize(int* quantized, float* output, int num_output, int offset, float
   }
 }
 
+const int *__attribute__((optimize("O0"))) FPGA::qblockMM(Compute* comp)
+{
+  num_block_call_ += 1;
+
+  // fpga version
+  *output_ = 0x5555;
+  while (*output_ == 0x5555)
+    ;
+
+  return qdata_M;
+}
+
 const float* FPGA::blockMM(Compute* comp)
 {
   num_block_call_ += 1;
 
   // cpu version
-  float* m1 = this->matrix_M1();
-  float* m2 = this->matrix_M2();
+  int* m1 = this->qmatrix_M1();
+  int* m2 = this->qmatrix_M2();
   float* out  = reinterpret_cast<float*>(output_M);  
 
   if(comp->quantized)
@@ -111,26 +148,28 @@ const float* FPGA::blockMM(Compute* comp)
 
     float act_scale = 0; // TODO calculate the scale factor
     char act_offset = 0; // TODO calculate the zero-offset
-    quantize(m1, qdata_M, m1_size_, (int)act_bits_min, (int)act_bits_max, (int)act_offset, act_scale); // TODO complete quantize function
+    act_scale = (comp->act_max - comp->act_min)/act_bits_max;
+
+    quantize(this->matrix_M1(), m1, m1_size_, act_bits_min, act_bits_max, act_offset, act_scale); // TODO complete quantize function
+
 
     char weight_bits_min = 0;
     char weight_bits_max = (1<<(comp->weight_bits-1))-1;
 
     float weight_scale = 0; // TODO calculate the scale factor
-    char weight_offset = 0; // TODO calculate the zero-offset
-    quantize(m2, qdata_M + m1_size_, m2_size_, (int)weight_bits_min, (int)weight_bits_max, (int)weight_offset, weight_scale); // TODO complete quantize function
+    char weight_offset = 0;
 
+    weight_scale = (comp->weight_max - comp->weight_min)/weight_bits_max;
+    quantize(this->matrix_M2(), m2, m2_size_, weight_bits_min, weight_bits_max, weight_offset, weight_scale); // TODO complete quantize function
+
+
+    //qout_M = this->qblockMM(comp);
     for(int i = 0; i < v_size_; ++i)
     {
       for(int j = 0; j < v_size_; ++j){    
         qout_M[v_size_*i+j] = 0;
-        output_M[v_size_*i+j] = 0;
         for(int k = 0; k < v_size_; ++k){
-          qm1_[v_size_*i + j] = (qdata_M[v_size_*i+k] & 127);
-          qm2_[v_size_*i + j] = ((qdata_+m1_size_)[v_size_*k + j] & 127);
-          output_M[v_size_*i+j] = qm1_[v_size_*i + j] * qm2_[v_size_*i + j];
-          qout_M[v_size_*i+j] += output_M[v_size_*i + j];
-          //what's mean?
+          qout_M[v_size_*i+j] += m1[v_size_*i+k] * m2[v_size_*k + j];
         }
       }
     }
@@ -160,8 +199,8 @@ const float *FPGA::blockMV(Compute* comp)
   num_block_call_ += 1;
 
   // cpu version
-  int *vec = qdata_;
-  int *mat = qdata_ + v_size_;
+  int *vec = this->qvector();
+  int *mat = this->qmatrix();
 
   float *out = reinterpret_cast<float *>(output_);
 
@@ -173,7 +212,7 @@ const float *FPGA::blockMV(Compute* comp)
     float act_scale = 0; // TODO calculate the scale factor
     char act_offset = 0; // TODO calculate the zero-offset
     act_scale = (comp->act_max - comp->act_min)/act_bits_max;
-    quantize(this->vector() , vec, data_size_, (int)act_bits_min, (int)act_bits_max, (int)act_offset, act_scale); // TODO complete quantize function
+    quantize(this->vector() , vec, data_size_, act_bits_min, act_bits_max, act_offset, act_scale); // TODO complete quantize function
 
     char weight_bits_min = 0;
     char weight_bits_max = (1<<(comp->weight_bits-1))-1;
@@ -182,7 +221,7 @@ const float *FPGA::blockMV(Compute* comp)
     char weight_offset = 0; // TODO calculate the zero-offset
 
     weight_scale = (comp->weight_max - comp->weight_min)/weight_bits_max;
-    quantize(this->matrix(), mat, data_size_ + v_size_, (int)weight_bits_min, (int)weight_bits_max, (int)weight_offset, weight_scale); // TODO complete quantize function
+    quantize(this->matrix(), mat, data_size_ + v_size_, weight_bits_min, weight_bits_max, weight_offset, weight_scale); // TODO complete quantize function
 
     for (int i = 0; i < m_size_; ++i)
     {
@@ -290,7 +329,7 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
       int block_row = min(m_size_, num_output - i);
       int block_col = min(v_size_, num_input - j);
 
-     // !) Assign a vector
+      // !) Assign a vector
       /* IMPLEMENT */
       memcpy(vec, input + j, sizeof(float) * block_col);
       if (block_col < v_size_)
@@ -309,7 +348,6 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
       {
         memset(mat + k * v_size_, 0, sizeof(float) * (v_size_));
       }
-
       // 3) Call a function `blockMV() to execute MV multiplication
       const float* ret = this->blockMV(comp);
 
@@ -374,7 +412,7 @@ void FPGA::convLowering(const std::vector<std::vector<std::vector<std::vector<fl
           for (int m = 0; m < conv_width; m++)
           {
             int row = i * conv_height * conv_width + l * conv_width + m;
-            int col = j * (input_width - conv_width + 1) + k;
+            int col = j * (input_height - conv_height + 1) + k;
             new_inputs[row][col] = inputs[i][j + l][k + m];
           }
         }
