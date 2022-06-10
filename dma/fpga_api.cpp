@@ -37,6 +37,7 @@ FPGA::~FPGA()
   close(fd_);
 
   delete[] data_;
+  delete[] output_MV;
 }
 
 float* FPGA::matrix(void)
@@ -98,7 +99,7 @@ const float* __attribute__((optimize("O0"))) FPGA::blockMM()
 
   *(fpga_dma + 6) = 0x10000000;
   *(fpga_dma + 8) = 0xC0000000;
-  *(fpga_dma + 10) = 2 * v_size_ * v_size_ * sizeof(float);
+  *(fpga_dma + 10) = data_size_M;
   while((*(fpga_dma + 1) & 0x00000002) == 0);
   // fpga version
   *output_ = 0x5555;
@@ -180,7 +181,7 @@ void FPGA::largeMM(const float* weight_mat, const float* input_mat, float* outpu
 
         // 1) Assign a m1
         // IMPLEMENT THIS
-        for (int row1 = 0; row1 < block_row; k++)
+        for (int row1 = 0; row1 < block_row; row1++)
         {
           
           memcpy(m1 + row1 * v_size_, weight_mat + (i + row1) * num_input + j, sizeof(float) * block_col_1);

@@ -81,7 +81,7 @@ int FPGA::num_block_call(void)
 void quantize(const float* input, char* quantized, int num_input, int bits_min, int bits_max, int offset, float scale)
 {
   int i;
-  for(i = 0; i < num_input; i = i + 4)
+  for(i = 0; i < num_input; i = i++)
   {
     quantized[i] = (char)(input[i]/scale) + offset;
   }
