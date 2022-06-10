@@ -195,7 +195,7 @@ void FPGA::largeMM(const float* weight_mat, const float* input_mat, float* outpu
         {
           float *ps_dram = mmap(NULL, sizeof(float) * block_col_2, PROT_READ|PROT_WRITE, MAP_SHARE, fd_, 0x10000000);
           memcpy(ps_dram, input_mat + (j + row2) * num_matrix2 + k, sizeof(float) * block_col_2);
-          unsigned int *fpga_dma = mmap(NULL, 16*sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED, foo, 0x43C00000); // register address
+          unsigned int *fpga_dma = mmap(NULL, 16*sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED, foo, 0x0x7E200000); // register address
           *(fpga_dma + 6) = 0x10000000;
           *(fpga_dma + 8) = m2 + row2 * v_size_; // should change this to adress which is seen by dma
           *(fpga_dma + 10) = sizeof(float) * block_col_2;
