@@ -18,11 +18,12 @@ FPGA::FPGA(off_t data_addr, off_t output_addr, int m_size, int v_size)
   data_size_M = (2*v_size_)*v_size_*sizeof(float);
 
   fd_ = open("/dev/mem", O_RDWR);
-  data_M = static_cast<float*>(mmap(NULL, data_size_M, PROT_READ|PROT_WRITE, MAP_SHARED, fd_, data_addr));
+  data_M = static_cast<float*>(mmap(NULL, data_size_M, PROT_READ|PROT_WRITE, MAP_SHARED, fd_, 0x10000000));
   data_ = new float[data_size_];	
 
   output_ = static_cast<unsigned int*>(mmap(NULL, sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED,fd_, output_addr));
   output_MV = new unsigned int[m_size_];
+  fpga_dma = static_cast<unsigned int*>(mmap(NULL, 16 * sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED, fd_, 0x7E200000));
   // output_M = static_cast<unsigned int*>(NULL);
 
   num_block_call_ = 0;
@@ -32,6 +33,7 @@ FPGA::~FPGA()
 {
   munmap(data_M, data_size_M);
   munmap(output_, sizeof(unsigned int));
+  munmap(fpga_dma, 16*sizeof(unsigned int));
   close(fd_);
 
   delete[] data_;
@@ -93,9 +95,19 @@ const float* __attribute__((optimize("O0"))) FPGA::blockMM()
 {
   num_block_call_ += 1;
 
+
+  *(fpga_dma + 6) = 0x10000000;
+  *(fpga_dma + 8) = 0xC0000000;
+  *(fpga_dma + 10) = 2 * v_size_ * v_size_ * sizeof(float);
+  while((*(fpga_dma + 1) & 0x00000002) == 0);
   // fpga version
   *output_ = 0x5555;
   while(*output_ == 0x5555);
+
+  *(fpga_dma + 6) = 0xC0000000;
+  *(fpga_dma + 8) = 0x10000000;
+  *(fpga_dma + 10) = v_size_ * v_size_ * sizeof(float);
+  while((*(fpga_dma + 1) & 0x00000002) == 0);
 
   return data_M;    
 }
@@ -170,15 +182,8 @@ void FPGA::largeMM(const float* weight_mat, const float* input_mat, float* outpu
         // IMPLEMENT THIS
         for (int row1 = 0; row1 < block_row; k++)
         {
-          float *ps_dram = mmap(NULL, sizeof(float) * block_col_1, PROT_READ|PROT_WRITE, MAP_SHARE, fd_, 0x10000000);
-          memcpy(ps_dram, weight_mat + (i + row1) * num_input + j, sizeof(float) * block_col_1);
-          unsigned int *fpga_dma = mmap(NULL, 16*sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED, foo, 0x7E200000); // register address
-          *(fpga_dma + 6) = 0x10000000;
-          *(fpga_dma + 8) = m1 + row1 * v_size_; // should change this to adress which is seen by dma
-          *(fpga_dma + 10) = sizeof(float) * block_col_1;
-          while((*(fpga_dma + 1) && 0x00000002) == 0);
           
-          //memcpy(m1 + row1 * v_size_, weight_mat + (i + row1) * num_input + j, sizeof(float) * block_col_1);
+          memcpy(m1 + row1 * v_size_, weight_mat + (i + row1) * num_input + j, sizeof(float) * block_col_1);
 
           if (block_col_1 < v_size_)
             memset(m1 + row1 * v_size_ + block_col_1, 0, sizeof(float) * (v_size_ - block_col_1));
@@ -193,16 +198,8 @@ void FPGA::largeMM(const float* weight_mat, const float* input_mat, float* outpu
         // IMPLEMENT THIS
         for (int row2 = 0; row2 < block_col_1; row2++)
         {
-          float *ps_dram = mmap(NULL, sizeof(float) * block_col_2, PROT_READ|PROT_WRITE, MAP_SHARE, fd_, 0x10000000);
-          memcpy(ps_dram, input_mat + (j + row2) * num_matrix2 + k, sizeof(float) * block_col_2);
-          unsigned int *fpga_dma = mmap(NULL, 16*sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED, foo, 0x0x7E200000); // register address
-          *(fpga_dma + 6) = 0x10000000;
-          *(fpga_dma + 8) = m2 + row2 * v_size_; // should change this to adress which is seen by dma
-          *(fpga_dma + 10) = sizeof(float) * block_col_2;
-          while((*(fpga_dma + 1) && 0x00000002) == 0);
 
-
-          //memcpy(m2 + row2 * v_size_, input_mat + (j + row2) * num_matrix2 + k, sizeof(float) * block_col_2);
+          memcpy(m2 + row2 * v_size_, input_mat + (j + row2) * num_matrix2 + k, sizeof(float) * block_col_2);
 
           if (block_col_2 < v_size_)
             memset(m2 + row2 * v_size_ + block_col_2, 0, sizeof(float) * (v_size_ - block_col_2));
