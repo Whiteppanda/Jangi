@@ -83,7 +83,7 @@ void quantize(const float* input, int* quantized, int num_input, int bits_min, i
   int i;
   for(i = 0; i < num_input; i = i + 4)
   {
-    quantized[i] = round(input[i]/scale);
+    quantized[i] = (int)(input[i]/scale);
   }
 }
 
