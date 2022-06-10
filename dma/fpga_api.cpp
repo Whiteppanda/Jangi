@@ -21,7 +21,7 @@ FPGA::FPGA(off_t data_addr, off_t output_addr, int m_size, int v_size)
   data_M = static_cast<float*>(mmap(NULL, data_size_M, PROT_READ|PROT_WRITE, MAP_SHARED, fd_, 0x10000000));
   data_ = new float[data_size_];	
 
-  output_ = static_cast<unsigned int*>(mmap(NULL, sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED,fd_, output_addr));
+  output_ = static_cast<unsigned int*>(mmap(NULL, sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED,fd_, 0x43C00000));
   output_MV = new unsigned int[m_size_];
   fpga_dma = static_cast<unsigned int*>(mmap(NULL, 16 * sizeof(unsigned int), PROT_READ|PROT_WRITE, MAP_SHARED, fd_, 0x7E200000));
   // output_M = static_cast<unsigned int*>(NULL);
