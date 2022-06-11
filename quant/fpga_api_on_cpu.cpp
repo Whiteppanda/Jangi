@@ -192,7 +192,7 @@ const float *FPGA::blockMV(Compute* comp)
     {
       out[i] = 0;
       for (int j = 0; j < v_size_; ++j)
-        out[i] += this->vector()[j] * this->matrix()[v_size_ * i + j];
+        out[i] += vec[j] * mat[v_size_ * i + j];
     }
   }
 
