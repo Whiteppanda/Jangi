@@ -27,7 +27,7 @@ FPGA::FPGA(off_t data_addr, off_t output_addr, int m_size, int v_size)
   qout_ = new int[m_size_];
   qout_M = new int[v_size_*v_size_];
 
-  tmpoutput_ = new unsigned int[m_size_]; // sibal
+  output_ = new unsigned int[m_size_]; 
   output_M = new unsigned int[v_size_*v_size_]; // use output_M as tempolar output
 
   data_ = new float[data_size_];
@@ -38,14 +38,14 @@ FPGA::FPGA(off_t data_addr, off_t output_addr, int m_size, int v_size)
   qdata_ = new int[data_size_];
   qdata_M = static_cast<int *>(mmap(NULL, data_size_M, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, data_addr));
   
-  output_ = static_cast<unsigned int *>(mmap(NULL, sizeof(unsigned int), PROT_READ | PROT_WRITE, MAP_SHARED, fd_, output_addr));
+  bram_output_ = static_cast<unsigned int *>(mmap(NULL, sizeof(unsigned int), PROT_READ | PROT_WRITE, MAP_SHARED, fd_, output_addr));
   num_block_call_ = 0;
 }
 
 FPGA::~FPGA()
 {
   munmap(qdata_M, data_size_);
-  munmap(output_, sizeof(unsigned int));
+  munmap(bram_output_, sizeof(unsigned int));
   close(fd_);
 
   delete[] output_;
@@ -124,11 +124,11 @@ const int *__attribute__((optimize("O0"))) FPGA::qblockMM()
   num_block_call_ += 1;
 
   // fpga version
-  *output_ = 0x5555;
-  while (*output_ == 0x5555)
-    ;
+  *bram_output_ = 0x5555;
+  while (*bram_output_ == 0x5555)
+  ;
 
-  return qdata_M;
+
 }
 
 const float* FPGA::blockMM(Compute* comp)
@@ -139,9 +139,9 @@ const float* FPGA::blockMM(Compute* comp)
   float* m1 = this->matrix_M1();
   float* m2 = this->matrix_M2();
   float* out  = reinterpret_cast<float*>(output_M);
-  char *qm1 = reinterpret_cast<char *> (this->qmatrix_M1());
-  char *qm2 = reinterpret_cast<char *> (this->qmatrix_M2());
-  short *qout = reinterpret_cast<short*>(this->qmatrix_M1());
+  char *qm1 = reinterpret_cast<char *> (qdata_M);
+  char *qm2 = reinterpret_cast<char *> (qdata_M + m1_size_);
+  short *qout = reinterpret_cast<short*>(qdata_M);
 
   if(comp->quantized)
   {
@@ -193,7 +193,7 @@ const float *FPGA::blockMV(Compute* comp)
   float *vec = this->vector();
   float *mat = this->matrix();
 
-  float *out = reinterpret_cast<float *>(tmpoutput_);
+  float *out = reinterpret_cast<float *>(output_);
 
   if(comp->quantized)
   {
