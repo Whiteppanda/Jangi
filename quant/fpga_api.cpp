@@ -27,7 +27,7 @@ FPGA::FPGA(off_t data_addr, off_t output_addr, int m_size, int v_size)
   qout_ = new int[m_size_];
   qout_M = new int[v_size_*v_size_];
 
-  output_ = new unsigned int[m_size_]; // use output_ as tempolar output
+  tmpoutput_ = new unsigned int[m_size_]; // sibal
   output_M = new unsigned int[v_size_*v_size_]; // use output_M as tempolar output
 
   data_ = new float[data_size_];
@@ -193,7 +193,7 @@ const float *FPGA::blockMV(Compute* comp)
   float *vec = this->vector();
   float *mat = this->matrix();
 
-  float *out = reinterpret_cast<float *>(output_);
+  float *out = reinterpret_cast<float *>(tmpoutput_);
 
   if(comp->quantized)
   {
